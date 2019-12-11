@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+import sys
+import os
+
+def open_or_exit(filename, mode):
+    try:
+        return open(filename, mode)
+    except FileNotFoundError:
+        sys.exit("ERROR: cannot open file '{}': does not exist".format(filename))
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
+def peel_with_condition(str, cond):
+    for i in range(0, len(str)):
+        if not cond(str[i]):
+            return str[:i], str[i:]
+    return str, ""
+
+def isalpha(c):
+    return c.isalpha()
+
+class UnitFileLine:
+    def __init__(self, str_with_newline, is_trivial):
+        self.str_with_newline = str_with_newline
+        self.is_trivial = is_trivial
+
+class UnitFileSection:
+    def __init__(self, name, lines):
+        self.name = name
+        self.lines = lines
+    def set(self, item):
+        new_item_line = UnitFileLine(item + "\n", False)
+        new_item_name,_ = peel_with_condition(item, isalpha)
+        for line_index in range(1, len(self.lines)):
+            line = self.lines[line_index]
+            if line.is_trivial:
+                continue
+            existing_item_name,_ = peel_with_condition(line.str_with_newline, isalpha)
+            if new_item_name == existing_item_name:
+                self.lines[line_index] = new_item_line
+                return
+        self.lines.append(new_item_line)
+
+class UnitFile:
+    def __init__(self, sections):
+        self.sections = sections
+    def set(self, section, item):
+        for existing_section in self.sections:
+            if section == existing_section.name:
+                existing_section.set(item)
+                return
+
+        # add a newline to previous section
+        if len(self.sections) > 0:
+            self.sections[-1].lines.append(UnitFileLine("\n", True))
+        new_section = UnitFileSection(section, [UnitFileLine("[{}]\n".format(section), False)])
+        new_section.set(item)
+        self.sections.append(new_section)
+    def dump(self, to):
+        for section in self.sections:
+            for line in section.lines:
+                to.write(line.str_with_newline)
+    def overwrite(self, filename):
+        # TODO: should be "w" or "wb"?
+        with open(filename, "w") as file:
+            self.dump(file)
+
+def skip_trivial(str):
+    while len(str) > 0:
+        if str[0] == '#':
+            return ""
+        elif str[0] == ' ':
+            str = str[1:]
+        else:
+            break
+    return str
+
+# returns line without the terminating newline if it exists
+def strip_newline(line):
+    if len(line) > 0 and line[len(line)-1] == '\n':
+        return line[:len(line)-1]
+    return line
+
+class UnitFileParser:
+    def __init__(self, filename):
+        self.filename = filename
+        self.line_number = 1
+        self.errors = 0
+        self.sections = []
+        self.current_section_name = None
+        self.current_section_lines = []
+
+    def end_current_section(self):
+        if len(self.current_section_lines) > 0:
+            self.sections.append(UnitFileSection(self.current_section_name, self.current_section_lines))
+
+    def new_section(self, name):
+        self.end_current_section()
+        self.current_section_name = name
+        self.current_section_lines = []
+
+    def error(self, msg):
+        eprint("{}({}): {}".format(self.filename, self.line_number, msg))
+        self.errors += 1
+
+    def parse(self):
+        # TODO: should this be "r" or "rb"?
+        with open_or_exit(self.filename, "r") as file:
+            #content = file.read()
+            line_number = 1
+            while True:
+                line_with_newline = file.readline()
+                if not line_with_newline:
+                    break;
+                is_trivial = self.parse_line(strip_newline(line_with_newline))
+                self.current_section_lines.append(UnitFileLine(line_with_newline, is_trivial))
+                self.line_number += 1
+
+        if self.errors > 0:
+            sys.exit("{} had {} errors".format(self.filename, self.errors))
+
+        self.end_current_section()
+        return UnitFile(self.sections)
+
+    def parse_line(self, line):
+        next = skip_trivial(line)
+        if len(next) == 0:
+            return
+        if next[0] == '[':
+            next = next[1:]
+            name, next = peel_with_condition(next, isalpha)
+            if len(name) == 0:
+                self.error("expected a section name (a-z or A-Z) after '[' but got '{}'".format(next))
+                return
+            if len(next) == 0:
+                self.error("section name missing terminating ']'")
+                return
+            if next[0] != ']':
+                self.error("expected ']' to end section name but got '{}'".format(next))
+                return
+            next = next[1:]
+            if len(next) > 0:
+                # TODO: allow trailing whitespace?
+                self.error("got extra characters after [section-name] '{}'".format(next))
+                return
+            self.new_section(name)
+
+if len(sys.argv) <= 1:
+    eprint("Usage: systemd-unit-file COMMAND ARGS...")
+    eprint("")
+    eprint("Commands:")
+    eprint(" set <file> <section> <item>")
+    eprint("                set item in section, overwrite if it already exists")
+    eprint(" dump <file>    parse the file and print it out")
+    eprint(" check <file>   checks the format of the file")
+    sys.exit(1)
+
+command = sys.argv[1]
+args = sys.argv[2:]
+
+def enforce_arg_count(expected_count):
+    if len(args) != expected_count:
+        sys.exit("ERROR: the '{}' command requires {} argument(s) but got {}".format(command, expected_count, len(args)))
+
+if False:
+    pass
+elif command == "set":
+    enforce_arg_count(3)
+    filename, section, item = args[0], args[1], args[2]
+    unitFile = UnitFileParser(filename).parse()
+    unitFile.set(section, item)
+    unitFile.overwrite(filename)
+elif command == "check":
+    enforce_arg_count(1)
+    filename = args[0]
+    UnitFileParser(filename).parse()
+elif command == "dump":
+    enforce_arg_count(1)
+    filename = args[0]
+    UnitFileParser(filename).parse().dump(sys.stdout)
+else:
+    sys.exit("Error: unknown command '{}'".format(command))

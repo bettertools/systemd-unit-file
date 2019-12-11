@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -ex
+
+cd $(dirname ${BASH_SOURCE[0]})
+systemd_unit_file=../systemd-unit-file
+
+rm -rf testout
+mkdir testout
+
+function insert_line() {
+    in_file=$1
+    out_file=$2
+    line_no=$3
+    skip_lines=$4
+    line_content=$5
+    sed -n 1,$((line_no-1))p $in_file > $out_file
+    echo $line_content >> $out_file
+    sed -n $((line_no+$skip_lines)),\$p $in_file >> $out_file
+}
+
+# verify that the file does not change
+$systemd_unit_file dump example.service > testout/example.actual
+diff example.service testout/example.actual
+
+insert_line example.service testout/example.expected 16 0 NewItem=foo
+cp example.service testout/example.actual
+$systemd_unit_file set testout/example.actual Service NewItem=foo
+diff testout/example.expected testout/example.actual
+
+insert_line example.service testout/example.expected 13 1 ExecStart=what
+cp example.service testout/example.actual
+$systemd_unit_file set testout/example.actual Service ExecStart=what
+diff testout/example.expected testout/example.actual
+
+cp example.service testout/example.expected
+echo "" >> testout/example.expected
+echo "[NewSection]" >> testout/example.expected
+echo "NewItem=bar" >> testout/example.expected
+cp example.service testout/example.actual
+$systemd_unit_file set testout/example.actual NewSection NewItem=bar
+diff testout/example.expected testout/example.actual
+
+#cp example.service testout/example-newsection.service
+#$systemd_unit_file set testout/example-newsection.service NewSection Foo=Bar
+
+$systemd_unit_file check bad-unit-file.unit 2> testout/bad-unit-file.actual-output || true
+if ! diff bad-unit-file.expected-output testout/bad-unit-file.actual-output; then
+   echo bad-unit-file.unit error output did not match expected
+   exit 1
+fi
+
+echo Success

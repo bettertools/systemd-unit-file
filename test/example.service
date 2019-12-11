@@ -1,0 +1,15 @@
+# some comments
+
+[Unit]
+Description=An example description
+Documentation=man:something.d(5) man:something-else(8)
+DefaultDependencies=no
+Conflicts=shutdown.target
+After=local-fs.target time-set.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=some-command a b c
+SuccessExitStatus=DATAERR
+IOSchedulingClass=idle

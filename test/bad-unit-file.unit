@@ -1,0 +1,22 @@
+
+# bad section names
+[
+[0
+[!
+[_
+
+# missing terminating ']'
+[a
+[z
+[Abc
+
+# expected ']' but got
+[a!]
+[a!
+[a ]
+[abc!
+
+# extra characters after [section-name]
+[a]a
+[a]!
+[a] 

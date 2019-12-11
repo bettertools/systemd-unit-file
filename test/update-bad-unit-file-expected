@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -ex
+cd $(dirname ${BASH_SOURCE[0]})
+../systemd-unit-file check bad-unit-file.unit 2> bad-unit-file.expected-output
